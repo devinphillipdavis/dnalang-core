@@ -51,6 +51,7 @@ pytest
 dnalang/
   lexer.py  parser.py  ast.py  sema.py     # language front end
   lower.py  qc_ir.py                        # lowering and flat IR (Qiskit / OpenQASM 3 exporters)
+  conformance.py                            # random programs vs an independent oracle, through to OpenQASM 3
   backends/  aer.py  ibm.py  qasm3.py       # execution; ibm.py writes the ledger before submitting
   metrics/   core.py                        # GHZ parity fidelity, |+> survival, W2 replicate scatter, bootstrap CIs
   ledger.py                                 # hash-chained JSONL
@@ -59,10 +60,16 @@ dnalang/
              lineage.py                     # lineage entries on the ledger; trace() back to generation 0
   cli.py                                    # dnalang parse|check|lower|qasm|run|verify-ledger|trace-lineage
 examples/   bell.dna  ghz.dna  dd_staggered_xy4.dna
-tests/      36 tests; includes "Bell is 50/50", "GHZ fidelity = 1 for any phase", "ledger detects tampering",
+tests/      65 tests; includes "Bell is 50/50", "GHZ fidelity = 1 for any phase", "ledger detects tampering",
             "recording lineage does not change the search"
 docs/       LANGUAGE.md
 ```
+
+## Conformance
+
+`python -m dnalang.conformance -n 10000 --seed 0` (needs `qiskit-qasm3-import`) generates random valid programs. Each uses both gate spellings, gene parameters and constant expressions, `wait`, `echo`, `barrier` and `cleave`. For each program the generator separately writes down the op list it means. A program passes when `lower(parse(...))` gives exactly that list, Qiskit's OpenQASM 3 importer reads the emitted text with the same operations and measurements, and three unitaries agree up to global phase (tolerance 1e-10): a NumPy reference built from the generator's list, Qiskit's reading of the OpenQASM 3, and `to_qiskit()`. The generator and the reference share no code with the compiler.
+
+The first 10,000-program run failed 31 times. Angles were exported with 12 significant digits, which lost up to ~4e-10 rad at a few hundred radians. Angles are now written exactly. After the fix, seeds 1 and 2 (20,000 programs) had 0 failures, so the failure rate is below 0.015% with 95% confidence. The harness is tested against planted bugs: rounded angles, reversed `cx` operands, a gate dropped in lowering, and shifted measurement bits.
 
 ## Lineage
 

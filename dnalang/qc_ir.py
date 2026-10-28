@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -91,7 +92,12 @@ class Circuit:
             elif o.name == "measure":
                 lines.append(f"c[{o.cbit}] = measure {qs};")
             elif o.params:
-                ps = ", ".join(f"{p:.12g}" for p in o.params)
+                # repr is the shortest literal that reads back as the same float, so
+                # angles survive export exactly (12 significant digits drifted ~4e-10
+                # at 760 rad, found by dnalang.conformance)
+                if not all(math.isfinite(p) for p in o.params):
+                    raise ValueError(f"{o.name} on {qs}: non-finite parameter {o.params}")
+                ps = ", ".join(repr(float(p)) for p in o.params)
                 lines.append(f"{o.name}({ps}) {qs};")
             else:
                 lines.append(f"{o.name} {qs};")
