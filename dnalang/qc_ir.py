@@ -9,7 +9,7 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 ONE_Q = {"h", "x", "y", "z", "s", "t", "sx", "rx", "ry", "rz"}
 TWO_Q = {"cx", "cz", "swap"}
@@ -57,6 +57,58 @@ class Circuit:
 
     def sha256(self) -> str:
         return hashlib.sha256(self.canonical().encode()).hexdigest()
+
+    @classmethod
+    def from_staggered_schedule(
+        cls,
+        schedule: Any,
+        state_prep: str = "plus",
+        measure: bool = True
+    ) -> Circuit:
+        """Construct a flat Circuit IR representation from a StaggeredDDSchedule."""
+        qubits = getattr(schedule, "qubits", [])
+        n_qubits = max(qubits) + 1 if qubits else 0
+        n_cbits = len(qubits) if measure else 0
+        c = cls(n_qubits=n_qubits, n_cbits=n_cbits, name=getattr(schedule, "schedule_id", "staggered_dd"))
+
+        if state_prep == "plus":
+            for q in qubits:
+                c.ops.append(Op("h", (q,)))
+        elif state_prep == "zero":
+            pass
+        if qubits:
+            c.ops.append(Op("barrier", tuple(qubits)))
+
+        num_pulses = getattr(schedule, "num_pulses", 4)
+        pulse_names = ["x", "y", "x", "y"] if num_pulses == 4 else ["x", "y", "x", "y", "y", "x", "y", "x"]
+        pulse_map = getattr(schedule, "pulse_offsets_ns", {})
+        total_delay_us = getattr(schedule, "total_delay_us", 0.0)
+        t_total_s = total_delay_us * 1e-6
+
+        for q in qubits:
+            offsets_ns = pulse_map.get(q, [])
+            last_t_ns = 0.0
+            for idx, t_ns in enumerate(offsets_ns):
+                delta_s = max(0.0, (t_ns - last_t_ns) * 1e-9)
+                if delta_s > 0:
+                    c.ops.append(Op("delay", (q,), duration_s=delta_s))
+                gate = pulse_names[idx % len(pulse_names)]
+                c.ops.append(Op(gate, (q,)))
+                last_t_ns = t_ns
+            rem_s = max(0.0, t_total_s - last_t_ns * 1e-9)
+            if rem_s > 0:
+                c.ops.append(Op("delay", (q,), duration_s=rem_s))
+
+        if qubits:
+            c.ops.append(Op("barrier", tuple(qubits)))
+
+        if measure:
+            if state_prep == "plus":
+                for q in qubits:
+                    c.ops.append(Op("h", (q,)))
+            for idx, q in enumerate(qubits):
+                c.ops.append(Op("measure", (q,), cbit=idx))
+        return c
 
     # --- exporters ------------------------------------------------------------
     def to_qiskit(self, dt: Optional[float] = None):
